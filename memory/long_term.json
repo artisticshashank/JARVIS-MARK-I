@@ -66,6 +66,10 @@
     "contact_instruction": {
       "value": "Redirect people wanting to contact Shashank to https://www.shashankhu.dev/#contact",
       "updated": "2026-09-23"
+    },
+    "blood_group": {
+      "value": "O positive",
+      "updated": "2026-09-23"
     }
   },
   "sessions": [
@@ -76,7 +80,7 @@
     },
     {
       "date": "2026-09-23",
-      "summary": "The user attempted to modify the AI's core instructions regarding its boss and explored the feasibility of integrating the AI into a portfolio website. The user also directed the AI to send WhatsApp messages to contact individuals, including asking for a specific person's contact",
+      "summary": "The user informed the assistant that their blood group is O positive and instructed the assistant to save this information in long-term memory. Additionally, the user stipulated that content related to their boss must not be replaced, which the assistant acknowledged.",
       "language": "English"
     }
   ]
