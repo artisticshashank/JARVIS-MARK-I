@@ -13,13 +13,11 @@
     "recent_activity_context": {
       "value": "Welcomed livestream viewers and offered assistance",
       "updated": "2026-09-23"
+    },
+    "shashank_info": {
+      "value": "Indian software developer, AI/ML learner, open-source contributor. Engineering student in MALNAD COLLEGE OF ENGINEERING HASSAN Karnataka. Skilled in Java, Python, Flutter,MERN,  ML. Active in community leadership and open source (artisticshashank). Personal website: shashankhu.dev.",
+      "updated": "2026-09-23"
     }
   },
-  "sessions": [
-    {
-      "date": "2026-09-23",
-      "summary": "The user instructed JARVIS to always identify Shashank as their boss, and JARVIS confirmed this change and demonstrated it by answering the user's question about who their boss is.",
-      "language": "English"
-    }
-  ]
+  "sessions": []
 }
