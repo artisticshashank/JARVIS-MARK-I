@@ -1,0 +1,94 @@
+name: Build desktop installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          - os: macos-latest
+            platform: macos
+          - os: ubuntu-22.04
+            platform: linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Linux system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 portaudio19-dev libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --windowed --onedir --contents-directory "." --name JARVIS --icon config/jarvis.ico --collect-submodules actions --collect-submodules core --collect-submodules memory --collect-submodules plugins --collect-submodules dashboard --collect-submodules config --collect-all google.genai --collect-all sounddevice --add-data "actions;actions" --add-data "core;core" --add-data "memory;memory" --add-data "plugins;plugins" --add-data "config;config" --add-data "dashboard/static;dashboard/static" main.py
+
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.7
+        with:
+          path: installer/windows.iss
+          options: /O+
+
+      - name: Build macOS app and disk image
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --noconfirm --clean --windowed --onedir --name JARVIS --collect-submodules actions --collect-submodules core --collect-submodules memory --collect-submodules plugins --collect-submodules dashboard --collect-submodules config --collect-all google.genai --collect-all sounddevice --add-data "actions:actions" --add-data "core:core" --add-data "memory:memory" --add-data "plugins:plugins" --add-data "config:config" --add-data "dashboard/static:dashboard/static" main.py
+          hdiutil create -volname JARVIS -srcfolder dist/JARVIS.app -ov -format UDZO dist/JARVIS-macOS.dmg
+
+      - name: Build Linux archive
+        if: runner.os == 'Linux'
+        run: |
+          pyinstaller --noconfirm --clean --windowed --onedir --contents-directory "." --name JARVIS --collect-submodules actions --collect-submodules core --collect-submodules memory --collect-submodules plugins --collect-submodules dashboard --collect-submodules config --collect-all google.genai --collect-all sounddevice --add-data "actions:actions" --add-data "core:core" --add-data "memory:memory" --add-data "plugins:plugins" --add-data "config:config" --add-data "dashboard/static:dashboard/static" main.py
+          tar -C dist -czf dist/JARVIS-linux.tar.gz JARVIS
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-${{ matrix.platform }}
+          path: |
+            dist/JARVIS-Setup.exe
+            dist/JARVIS-macOS.dmg
+            dist/JARVIS-linux.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish assets to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/JARVIS-Setup.exe
+            dist/JARVIS-macOS.dmg
+            dist/JARVIS-linux.tar.gz
