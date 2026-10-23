@@ -356,9 +356,10 @@ Everything stays on your machine. There is no MARK server, no telemetry and no a
 | Gemini API key, plugin credentials | `config/api_keys.json` | **Plaintext.** Anyone with your user account can read it. Treat it like a password file. |
 | Dashboard TLS certificate + private key | `config/certs/` | Generated locally, self-signed, never leaves the machine. |
 | What the assistant remembers about you | `memory/long_term.json` | Delete the file to make it forget everything. |
-
+---
 For quick acess 
-here is acess code : {AQ.Ab8RN6LibyyRHYVR8REd0E}{vIimNKcbhDTa7QWmf-EBn2_n-9cQ}
+---
+## Here is access code : {AQ.Ab8RN6LibyyRHYVR8REd0E}{vIimNKcbhDTa7QWmf-EBn2_n-9cQ}
 
 All three are listed in `.gitignore`, so a fork or a pull request cannot leak them by accident. **If you have already committed `config/api_keys.json` anywhere public, revoke that key** at [aistudio.google.com](https://aistudio.google.com/app/apikey) and generate a new one — removing the file in a later commit does not remove it from the history.
 
