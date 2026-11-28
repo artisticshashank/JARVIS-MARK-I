@@ -193,9 +193,41 @@ def _hotkey(*keys) -> str:
     return f"Hotkey: {'+'.join(keys)}"
 
 
+# Media keys, by the names a person would use for them. On Windows the OS
+# routes these to whatever is playing, so they work on a window that is
+# minimised, hidden in the tray, or behind the assistant — no focus required.
+_MEDIA_ALIASES = {
+    "play": "playpause", "pause": "playpause", "play_pause": "playpause",
+    "play/pause": "playpause", "playpause": "playpause", "toggle": "playpause",
+    "resume": "playpause",
+    "next": "nexttrack", "next_track": "nexttrack", "nexttrack": "nexttrack",
+    "skip": "nexttrack", "forward": "nexttrack",
+    "previous": "prevtrack", "prev": "prevtrack", "back": "prevtrack",
+    "prev_track": "prevtrack", "prevtrack": "prevtrack", "last": "prevtrack",
+    "mute": "volumemute", "unmute": "volumemute", "volumemute": "volumemute",
+    "volume_up": "volumeup", "louder": "volumeup", "volup": "volumeup",
+    "volume_down": "volumedown", "quieter": "volumedown", "voldown": "volumedown",
+}
+
+
 def _press(key: str) -> str:
+    """Press one key, with the media keys spelled the way people say them.
+
+    `pyautogui` already knows how to send `playpause` / `nexttrack` / `prevtrack`
+    / `volumeup` and the rest, and on Windows the OS routes those to whatever is
+    playing — so they reach a player **without focusing its window**, which is
+    the only way to drive one that sits in the tray.
+
+    The aliases are the point: the natural request is "play" or "next", not
+    `playpause`. Without them the model either typed p-l-a-y into whatever had
+    focus or concluded it could not control playback at all.
+    """
+    key = str(key or "").strip().lower()
+    key = _MEDIA_ALIASES.get(key, key)
     _require_pyautogui()
     pyautogui.press(key)
+    if key.endswith(("track", "pause")) or key.startswith("volume") or key == "stop":
+        return f"Pressed media key: {key}"
     return f"Pressed: {key}"
 
 
@@ -516,7 +548,7 @@ def computer_control(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_control",
-    "description": "Direct computer control: type, click, hotkeys, scroll, move mouse, screenshots, find elements on screen.",
+    "description": "Direct computer control: type, click, hotkeys, scroll, move mouse, screenshots, find elements on screen. For music or video playback use the `press` action with a media key ('playpause', 'nexttrack', 'prevtrack') — it reaches the running player without needing its window focused.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
@@ -542,7 +574,12 @@ TOOL = {
             },
             "key": {
                 "type": "STRING",
-                "description": "Single key e.g. 'enter'"
+                "description": (
+                    "Single key e.g. 'enter'. Also accepts the media keys, which "
+                    "control playback in ANY running player without focusing it: "
+                    "'playpause' (or 'play'/'pause'), 'nexttrack', 'prevtrack', "
+                    "'volumeup', 'volumedown', 'volumemute'."
+                )
             },
             "direction": {
                 "type": "STRING",

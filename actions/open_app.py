@@ -1,7 +1,9 @@
+import os
 import time
 import subprocess
 import platform
 import shutil
+from pathlib import Path
 
 try:
     import psutil
@@ -77,29 +79,219 @@ def _normalize(raw: str) -> str:
 
     return raw  
 
+# ── Windows: find it, launch it, then *look* ────────────────────────────────
+#
+# The old path pressed the Windows key, typed the app's name and returned True.
+# Three things were wrong with that, and only the third is obvious:
+#
+#   * it typed into whatever window had focus once the Start Menu closed, so a
+#     slow Start Menu sent the name somewhere else entirely;
+#   * it never checked, so "Spotify is open" was reported for an app that had
+#     never appeared — the user was told a thing happened and it had not;
+#   * an app that is *already running* (Spotify sits in the tray, as most music
+#     players do) is not a thing you launch. It is a thing you bring to the
+#     front, and pressing Win and typing its name is not how you do that.
+#
+# So: focus what is running, resolve a real executable for what is not, launch
+# it the way Windows itself would, and wait until a process actually exists
+# before answering. The keystroke route survives as a last resort only.
+
+_DETACHED = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+
+
+def _win_process_for(app_name: str):
+    """The running process for this app, or None.
+
+    Matches the executable's stem as well as its path, because an app called
+    "Visual Studio Code" runs as `Code.exe` — the display name and the process
+    name are frequently not the same string.
+    """
+    if not _PSUTIL:
+        return None
+    want = app_name.lower().replace(" ", "")
+    if not want:
+        return None
+    if want.endswith(".exe"):
+        want = want[:-4]
+
+    for proc in psutil.process_iter(["name", "exe"]):
+        try:
+            name = (proc.info.get("name") or "").lower().replace(" ", "")
+            exe = (proc.info.get("exe") or "").lower().replace(" ", "")
+        except Exception:
+            continue
+        if not name:
+            continue
+        stem = name[:-4] if name.endswith(".exe") else name
+        if stem in ("python", "pythonw", "jarvis"):    # never find ourselves
+            continue
+        if stem == want or want in stem:
+            return proc
+        if exe and want in exe.rsplit("\\", 1)[-1]:
+            return proc
+    return None
+
+
+def _win_focus(app_name: str) -> bool:
+    """Raise an already-running app's window. False if it has none to raise."""
+    try:
+        import pygetwindow as gw
+    except Exception:
+        return False
+
+    want = app_name.lower().replace(".exe", "")
+    try:
+        windows = [w for w in gw.getAllWindows()
+                   if getattr(w, "title", "") and want in w.title.lower()]
+    except Exception:
+        return False
+
+    for win in windows:
+        try:
+            if getattr(win, "isMinimized", False):
+                win.restore()
+            win.activate()
+            time.sleep(0.6)
+            return True
+        except Exception:
+            try:
+                # activate() is refused for some windows; the nudge is not.
+                win.minimize()
+                win.restore()
+                time.sleep(0.4)
+                return True
+            except Exception:
+                continue
+    return False
+
+
+def _win_app_paths(app_name: str):
+    """The executable registered under App Paths — where an installer declares
+    an app so that typing its name into Run works. Spotify is *not* registered
+    there, but plenty of things are, and it costs one registry read to check."""
+    try:
+        import winreg
+    except Exception:
+        return None
+
+    stem = app_name[:-4] if app_name.lower().endswith(".exe") else app_name
+    sub = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"
+    for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        for exe in (stem + ".exe", stem):
+            try:
+                with winreg.OpenKey(root, sub + "\\" + exe) as key:
+                    path = winreg.QueryValueEx(key, None)[0]
+                if path and Path(path).exists():
+                    return str(path)
+            except Exception:
+                continue
+    return None
+
+
+def _win_common_install(app_name: str):
+    """Per-user and per-machine install folders. Most packaged apps land in one
+    of these and never touch PATH — which is exactly why `shutil.which` found
+    nothing for an app that was installed and running."""
+    stem = app_name[:-4] if app_name.lower().endswith(".exe") else app_name
+    for root in (os.environ.get("LOCALAPPDATA"), os.environ.get("APPDATA"),
+                 os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+        if not root:
+            continue
+        for folder in (Path(root) / stem,
+                       Path(root) / "Programs" / stem,
+                       Path(root) / stem / "Application"):
+            for exe in (folder / f"{stem}.exe", folder / f"{stem}Launcher.exe"):
+                if exe.exists():
+                    return str(exe)
+    return None
+
+
+def _win_start_menu(app_name: str):
+    """This user's (or all users') Start Menu shortcut for the app.
+
+    Launching the .lnk with `os.startfile` is what clicking it does — minus the
+    window that has to be typed into, which is the whole problem.
+    """
+    stem = app_name[:-4] if app_name.lower().endswith(".exe") else app_name
+    want = stem.lower().replace(" ", "")
+    best = None
+    for root in (os.environ.get("APPDATA"), os.environ.get("ProgramData")):
+        if not root:
+            continue
+        folder = Path(root) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+        if not folder.exists():
+            continue
+        try:
+            for lnk in folder.rglob("*.lnk"):
+                name = lnk.stem.lower().replace(" ", "")
+                if name == want:
+                    return str(lnk)              # an exact name wins outright
+                if want in name and best is None:
+                    best = str(lnk)
+        except Exception:
+            continue
+    return best
+
+
+def _win_wait(app_name: str, timeout: float) -> bool:
+    """Wait for the process to actually exist.
+
+    This is the fix in one function: "did it open?" is a fact about the machine,
+    not an assumption made two seconds after a keystroke.
+    """
+    end = time.time() + timeout
+    while time.time() < end:
+        if _win_process_for(app_name) is not None:
+            return True
+        time.sleep(0.25)
+    return False
+
+
 def _launch_windows(app_name: str) -> bool:
 
-    if shutil.which(app_name) or shutil.which(app_name.split(".")[0]):
-        try:
-            subprocess.Popen(
-                app_name,
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            time.sleep(1.5)
-            return True
-        except Exception as e:
-            print(f"[open_app] subprocess failed: {e}")
+    # 1. Already running — bring it to the front. The commonest case, and the
+    #    one that failed hardest: a music player living in the notification area.
+    if _win_process_for(app_name) is not None and _win_focus(app_name):
+        return True
 
+    # 2. A real executable: PATH, then App Paths, then the usual install dirs.
+    target = (shutil.which(app_name)
+              or shutil.which(app_name.split(".")[0])
+              or _win_app_paths(app_name)
+              or _win_common_install(app_name))
+    if target:
+        try:
+            subprocess.Popen([target], **_DETACHED)
+            if _win_wait(app_name, 12.0):
+                return True
+            print(f"[open_app] '{target}' started but no process appeared")
+        except Exception as e:
+            print(f"[open_app] launch failed for '{target}': {e}")
+
+    # 3. The Start Menu shortcut, launched rather than mimed.
+    link = _win_start_menu(app_name)
+    if link:
+        try:
+            os.startfile(link)
+            if _win_wait(app_name, 12.0):
+                return True
+            print(f"[open_app] shortcut did not start a process: {link}")
+        except Exception as e:
+            print(f"[open_app] could not start '{link}': {e}")
+
+    # 4. URL handlers and ms-settings:-style protocols.
     if ":" in app_name:
         try:
-            subprocess.Popen(f"start {app_name}", shell=True)
+            subprocess.Popen(f"start {app_name}", shell=True, **_DETACHED)
             time.sleep(1.0)
             return True
         except Exception:
             pass
 
+    # 5. Last resort: the Start Menu, typed into. Kept because it is the only
+    #    thing left that can reach a Store app with no path and no shortcut we
+    #    can see — but it is last now, and it reports what actually happened
+    #    instead of quietly returning True.
     try:
         import pyautogui
         pyautogui.PAUSE = 0.1
@@ -108,8 +300,7 @@ def _launch_windows(app_name: str) -> bool:
         pyautogui.write(app_name, interval=0.05)
         time.sleep(0.9)
         pyautogui.press("enter")
-        time.sleep(2.5)
-        return True
+        return _win_wait(app_name, 8.0)
     except Exception as e:
         print(f"[open_app] Start Menu search failed: {e}")
 
