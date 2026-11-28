@@ -427,7 +427,31 @@ class HoloAvatar:
 
     # ── posing ──────────────────────────────────────────────────────────────
 
-    def _pose(self):
+    # Read-only window onto the animation state. A second renderer that draws
+    # this same head through a different camera (see `core.mouth_cam`) has to
+    # follow the face exactly, so it reads these instead of stepping a copy of
+    # its own — otherwise the wide shot and the close-up would drift apart.
+    @property
+    def mouth(self) -> float:
+        """0..1 smoothed jaw opening."""
+        return self._mouth
+
+    @property
+    def glow(self) -> float:
+        """0..1 smoothed voice energy."""
+        return self._glow
+
+    @property
+    def wide(self) -> float:
+        """Smoothed lip spread, -1 pursed (u) .. +1 spread (i)."""
+        return self._wide
+
+    @property
+    def head_angles(self) -> tuple[float, float]:
+        """(yaw, pitch) in radians — the close-up aims with these."""
+        return self._yaw, self._pitch
+
+    def pose(self):
         """Jaw drop, brow lift and head rotation, applied to the real geometry."""
         v = self._v
         np.copyto(v, self._v0)
@@ -487,7 +511,7 @@ class HoloAvatar:
         if bg is None:
             bg = QColor(0, 0, 0)
         amp = self._glow
-        verts, norms = self._pose()
+        verts, norms = self.pose()
 
         # ── aura ────────────────────────────────────────────────────────────
         ar = r * 1.95

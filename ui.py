@@ -38,6 +38,11 @@ try:
 except Exception:      # pragma: no cover — HUD must never die over cosmetics
     HoloAvatar = None
 
+try:
+    from core.mouth_cam import MouthCam
+except Exception:      # pragma: no cover — the close-up is optional, the HUD is not
+    MouthCam = None
+
 
 def _base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -400,6 +405,13 @@ class HudCanvas(QWidget):
             except Exception:
                 self._avatar = None
 
+        # The mouth close-up. It is a second *camera*, not a second head — it
+        # wraps the avatar above and reads its pose, so the wide shot and the
+        # close-up can never disagree about what the mouth is doing. Built
+        # lazily on first use: nobody who never opens it pays for the point
+        # lattice it precomputes.
+        self._mouthcam = None
+
         # Which centrepiece to draw. Read once here and changed live by the
         # settings toggle; the avatar object is kept either way so switching
         # back is instant and costs no reload.
@@ -444,6 +456,15 @@ class HudCanvas(QWidget):
         self._tmr = QTimer(self)
         self._tmr.timeout.connect(self._step)
         self._tmr.start(16)
+
+    def _mouth(self) -> "MouthCam | None":
+        """The close-up camera, built on first use (None if it cannot be built)."""
+        if self._mouthcam is None and MouthCam is not None and self._avatar is not None:
+            try:
+                self._mouthcam = MouthCam(self._avatar)
+            except Exception:
+                self._mouthcam = None
+        return self._mouthcam
 
     def glance(self, dx: float, dy: float, hold: float = 1.1) -> None:
         """Ask the avatar to look somewhere for a moment (see HoloAvatar.glance)."""
@@ -583,12 +604,17 @@ class HudCanvas(QWidget):
         # starts talking. Same lesson the head's sway taught.
         self._core_phase += min(0.10, max(0.0, dt))
 
-        if self._avatar is not None and self.hud_style == "face":
-            self._avatar.step(dt, amp, speaking=self.speaking,
-                              muted=self.muted, state=self.state,
-                              v_open=v_open, v_wide=v_wide or 0.0,
-                              v_level=v_level, v_seq=v_seq,
-                              v_hop=(sched[2] if sched is not None else 0.02))
+        if self._avatar is not None and self.hud_style in ("face", "mouth"):
+            av = self._avatar
+            # The close-up *drives* the same avatar, so only one of the two is
+            # ever stepped and the pose is always the current one.
+            if self.hud_style == "mouth":
+                av = self._mouth() or self._avatar
+            av.step(dt, amp, speaking=self.speaking,
+                    muted=self.muted, state=self.state,
+                    v_open=v_open, v_wide=v_wide or 0.0,
+                    v_level=v_level, v_seq=v_seq,
+                    v_hop=(sched[2] if sched is not None else 0.02))
         else:
             # Fallback core: slow "breathing" base target, lifted by the level.
             if now - self._last_t > (0.12 if self.speaking else 0.5):
@@ -840,11 +866,9 @@ class HudCanvas(QWidget):
         # capped by width, so it fills the HUD at any window size — including
         # fullscreen — without ever colliding with the status text below.
         _sy_status = cy + fw * 0.40
-        if self._avatar is not None and self.hud_style == "face":
+        if self._avatar is not None and self.hud_style in ("face", "mouth"):
             _band_t = 12.0
             _band_h = max(60.0, _sy_status - 12.0 - _band_t)
-            _r_head = min(fw * 0.355, _band_h / (self._avatar.SPAN + 0.08))
-            _head_cy = _band_t + (_band_h - self._avatar.SPAN * _r_head) / 2.0 + _r_head
 
             if self.muted:
                 _main = _acc = qcol(C.MUTED_C)
@@ -858,7 +882,25 @@ class HudCanvas(QWidget):
                     _acc = qcol(C.GREEN)
                 else:
                     _acc = qcol(C.PRI)
-            self._avatar.paint(p, cx, _head_cy, _r_head, _main, _acc, qcol(C.BG))
+
+            if self.hud_style == "mouth":
+                # The close-up owns the whole band: a circular lens as big as
+                # the shorter side allows, centred in it. Only a fraction of
+                # the head is in frame, so there is no crown or neck to leave
+                # room for.
+                _cam = self._mouth()
+                if _cam is not None:
+                    _r_lens = min(fw * 0.40, _band_h * 0.5 - 6.0)
+                    _cam.paint(p, cx, _band_t + _band_h / 2.0, _r_lens,
+                               _main, _acc, qcol(C.BG))
+                else:
+                    self.hud_style = "face"      # never leave the panel blank
+            else:
+                _r_head = min(fw * 0.355, _band_h / (self._avatar.SPAN + 0.08))
+                _head_cy = (_band_t + (_band_h - self._avatar.SPAN * _r_head) / 2.0
+                            + _r_head)
+                self._avatar.paint(p, cx, _head_cy, _r_head, _main, _acc,
+                                   qcol(C.BG))
 
         # reactor core — the other centrepiece, and the fallback if the head
         # could not be built. There is no third path: the old face.png branch
@@ -4764,30 +4806,41 @@ class MainWindow(QMainWindow):
 
 
     def _refresh_hud_btn(self):
-        from memory.config_manager import get_hud_style
-        face = get_hud_style() == "face"
-        # Neither state is "off", so both read as active — this is a choice
-        # between two things, not a switch with a disabled side.
-        style = f"""
+        from memory.config_manager import get_hud_style, HUD_STYLES
+        style = get_hud_style()
+        # None of the three is "off", so all read as active — this is a choice
+        # between three things, not a switch with a disabled side.
+        qss = f"""
             QPushButton {{ background: {C.PANEL2}; color: {C.PRI};
                 border: 1px solid {C.BORDER_A}; border-radius: 3px;
                 text-align: left; padding: 0 8px; }}
             QPushButton:hover {{ color: {C.WHITE}; border: 1px solid {C.BORDER_B}; }}"""
-        self._hud_btn.setText("🧑  HUD: ANIMATED FACE" if face
-                              else "◉  HUD: REACTOR CORE")
-        self._hud_btn.setStyleSheet(style)
-        self._hud_btn.setToolTip(
-            "An animated head that speaks your words and shows what JARVIS is "
-            "doing. Tap to switch to the reactor core."
-            if face else
-            "A reactor core that turns with the state and moves with your voice. "
-            "Tap to switch to the animated head.")
+        label, tip = {
+            "face": ("🧑  HUD: ANIMATED FACE",
+                     "An animated head that speaks your words and shows what "
+                     "JARVIS is doing. Tap for a close-up on its mouth."),
+            "mouth": ("👄  HUD: MOUTH CLOSE-UP",
+                      "The same head through a tight lens, so you can read the "
+                      "lip-sync shape by shape instead of pixel by pixel. Tap "
+                      "for the reactor core."),
+            "core": ("◉  HUD: REACTOR CORE",
+                     "A reactor core that turns with the state and moves with "
+                     "your voice. Tap to switch back to the animated head."),
+        }.get(style, ("🧑  HUD: ANIMATED FACE", ""))
+        self._hud_btn.setText(label)
+        self._hud_btn.setStyleSheet(qss)
+        self._hud_btn.setToolTip(tip)
 
     def _toggle_hud_style(self):
-        """Swap the centrepiece. Both objects stay in memory, so the change is
+        """Swap the centrepiece. Every style stays in memory, so the change is
         instant and switching back costs nothing."""
-        from memory.config_manager import get_hud_style, save_hud_style
-        want = "core" if get_hud_style() == "face" else "face"
+        from memory.config_manager import (get_hud_style, save_hud_style,
+                                           HUD_STYLES)
+        cur = get_hud_style()
+        # A three-way cycle in the order the button walks through them, so the
+        # label you are looking at tells you what the next tap gives you.
+        order = [s for s in ("face", "mouth", "core") if s in HUD_STYLES]
+        want = order[(order.index(cur) + 1) % len(order)] if cur in order else "face"
         save_hud_style(want)
         try:
             self.hud.hud_style = want
@@ -4795,9 +4848,11 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._refresh_hud_btn()
-        self._log.append_log(
-            "SYS: HUD switched to the animated face." if want == "face"
-            else "SYS: HUD switched to the reactor core.")
+        self._log.append_log({
+            "face": "SYS: HUD switched to the animated face.",
+            "mouth": "SYS: HUD switched to the mouth close-up.",
+            "core": "SYS: HUD switched to the reactor core.",
+        }.get(want, "SYS: HUD switched."))
 
     def _toggle_ptt(self):
         from memory.config_manager import (get_push_to_talk_enabled,
