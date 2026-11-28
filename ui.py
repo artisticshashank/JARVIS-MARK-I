@@ -39,13 +39,8 @@ except Exception:      # pragma: no cover — HUD must never die over cosmetics
     HoloAvatar = None
 
 try:
-    from core.mouth_cam import MouthCam
-except Exception:      # pragma: no cover — the close-up is optional, the HUD is not
-    MouthCam = None
-
-try:
     from core.voice_orb import VoiceOrb
-except Exception:      # pragma: no cover — as above
+except Exception:      # pragma: no cover — the orb is optional, the HUD is not
     VoiceOrb = None
 
 
@@ -410,16 +405,9 @@ class HudCanvas(QWidget):
             except Exception:
                 self._avatar = None
 
-        # The mouth close-up. It is a second *camera*, not a second head — it
-        # wraps the avatar above and reads its pose, so the wide shot and the
-        # close-up can never disagree about what the mouth is doing. Built
-        # lazily on first use: nobody who never opens it pays for the point
-        # lattice it precomputes.
-        self._mouthcam = None
-
         # The dot orb: the voice as a ball of points, with nothing drawn around
-        # it. Independent of the head, and just as lazy — a user who never picks
-        # it never pays for the point cloud either.
+        # it. Built lazily — a user who never picks it never pays for the point
+        # cloud either.
         self._orb = None
         self._orb_tried = False
 
@@ -467,15 +455,6 @@ class HudCanvas(QWidget):
         self._tmr = QTimer(self)
         self._tmr.timeout.connect(self._step)
         self._tmr.start(16)
-
-    def _mouth(self) -> "MouthCam | None":
-        """The close-up camera, built on first use (None if it cannot be built)."""
-        if self._mouthcam is None and MouthCam is not None and self._avatar is not None:
-            try:
-                self._mouthcam = MouthCam(self._avatar)
-            except Exception:
-                self._mouthcam = None
-        return self._mouthcam
 
     def _voice_orb(self) -> "VoiceOrb | None":
         """The dot orb, built on first use (None if it cannot be built).
@@ -639,17 +618,12 @@ class HudCanvas(QWidget):
                           state=self.state)
             else:
                 self.hud_style = "core"      # never leave the panel blank
-        elif self._avatar is not None and self.hud_style in ("face", "mouth"):
-            av = self._avatar
-            # The close-up *drives* the same avatar, so only one of the two is
-            # ever stepped and the pose is always the current one.
-            if self.hud_style == "mouth":
-                av = self._mouth() or self._avatar
-            av.step(dt, amp, speaking=self.speaking,
-                    muted=self.muted, state=self.state,
-                    v_open=v_open, v_wide=v_wide or 0.0,
-                    v_level=v_level, v_seq=v_seq,
-                    v_hop=(sched[2] if sched is not None else 0.02))
+        elif self._avatar is not None and self.hud_style == "face":
+            self._avatar.step(dt, amp, speaking=self.speaking,
+                              muted=self.muted, state=self.state,
+                              v_open=v_open, v_wide=v_wide or 0.0,
+                              v_level=v_level, v_seq=v_seq,
+                              v_hop=(sched[2] if sched is not None else 0.02))
         else:
             # Fallback core: slow "breathing" base target, lifted by the level.
             if now - self._last_t > (0.12 if self.speaking else 0.5):
@@ -896,15 +870,20 @@ class HudCanvas(QWidget):
             self._grid_key   = _gkey
         p.drawPixmap(0, 0, self._grid_cache)
 
-        # ── holographic head ────────────────────────────────────────────────
-        # Sized to the band between the top of the canvas and the status line,
-        # capped by width, so it fills the HUD at any window size — including
-        # fullscreen — without ever colliding with the status text below.
+        # ── centrepiece ────────────────────────────────────────────────
+        # The head and the orb are sized to the band between the top of the
+        # canvas and the status line, capped by width, so they fill the HUD at
+        # any window size — including fullscreen — without ever colliding with
+        # the status text below. The core sizes itself in its own painter.
         _sy_status = cy + fw * 0.40
-        if self._avatar is not None and self.hud_style in ("face", "mouth"):
+        _orb = self._voice_orb() if self.hud_style == "orb" else None
+
+        if (self._avatar is not None and self.hud_style == "face") or _orb is not None:
             _band_t = 12.0
             _band_h = max(60.0, _sy_status - 12.0 - _band_t)
 
+            # One palette for both, resolved here: the orb and the head speak
+            # the same colour language, and the accent is the state either way.
             if self.muted:
                 _main = _acc = qcol(C.MUTED_C)
             else:
@@ -918,18 +897,10 @@ class HudCanvas(QWidget):
                 else:
                     _acc = qcol(C.PRI)
 
-            if self.hud_style == "mouth":
-                # The close-up owns the whole band: a circular lens as big as
-                # the shorter side allows, centred in it. Only a fraction of
-                # the head is in frame, so there is no crown or neck to leave
-                # room for.
-                _cam = self._mouth()
-                if _cam is not None:
-                    _r_lens = min(fw * 0.40, _band_h * 0.5 - 6.0)
-                    _cam.paint(p, cx, _band_t + _band_h / 2.0, _r_lens,
-                               _main, _acc, qcol(C.BG))
-                else:
-                    self.hud_style = "face"      # never leave the panel blank
+            if _orb is not None:
+                _r_orb = min(fw * 0.36, _band_h * 0.44)
+                _orb.paint(p, cx, _band_t + _band_h / 2.0, _r_orb,
+                           _main, _acc, qcol(C.BG))
             else:
                 _r_head = min(fw * 0.355, _band_h / (self._avatar.SPAN + 0.08))
                 _head_cy = (_band_t + (_band_h - self._avatar.SPAN * _r_head) / 2.0
@@ -937,30 +908,8 @@ class HudCanvas(QWidget):
                 self._avatar.paint(p, cx, _head_cy, _r_head, _main, _acc,
                                    qcol(C.BG))
 
-        # the dot orb — the voice with no face and no frame around it
-        elif self.hud_style == "orb" and self._voice_orb() is not None:
-            _band_t = 12.0
-            _band_h = max(60.0, _sy_status - 12.0 - _band_t)
-            if self.muted:
-                _main = _acc = qcol(C.MUTED_C)
-            else:
-                _main = qcol(C.PRI)
-                if self.speaking:
-                    _acc = qcol(C.ACC)
-                elif self.state in ("THINKING", "PROCESSING"):
-                    _acc = qcol(C.ACC2)
-                elif self.state == "LISTENING":
-                    _acc = qcol(C.GREEN)
-                else:
-                    _acc = qcol(C.PRI)
-            _r_orb = min(fw * 0.36, _band_h * 0.44)
-            self._voice_orb().paint(p, cx, _band_t + _band_h / 2.0, _r_orb,
-                                    _main, _acc, qcol(C.BG))
-
-        # reactor core — the other centrepiece, and the fallback if the head
-        # could not be built. There is no third path: the old face.png branch
-        # was unreachable (no such file ships) and the bare orb it fell through
-        # to is what this replaces.
+        # reactor core — the other centrepiece, and the fallback if neither of
+        # the above could be built. It draws its own palette from the state.
         else:
             _band_t = 12.0
             _band_h = max(60.0, _sy_status - 12.0 - _band_t)
@@ -4873,11 +4822,7 @@ class MainWindow(QMainWindow):
         label, tip = {
             "face": ("🧑  HUD: ANIMATED FACE",
                      "An animated head that speaks your words and shows what "
-                     "JARVIS is doing. Tap for a close-up on its mouth."),
-            "mouth": ("👄  HUD: MOUTH CLOSE-UP",
-                      "The same head through a tight lens, so you can read the "
-                      "lip-sync shape by shape instead of pixel by pixel. Tap "
-                      "for the voice orb."),
+                     "JARVIS is doing. Tap for the voice orb."),
             "orb": ("🔵  HUD: VOICE ORB",
                     "The voice as a ball of dots — nothing drawn around it, no "
                     "ring, no frame. Tap for the reactor core."),
@@ -4895,9 +4840,9 @@ class MainWindow(QMainWindow):
         from memory.config_manager import (get_hud_style, save_hud_style,
                                            HUD_STYLES)
         cur = get_hud_style()
-        # A four-way cycle in the order the button walks through them, so the
+        # A three-way cycle in the order the button walks through them, so the
         # label you are looking at tells you what the next tap gives you.
-        order = [s for s in ("face", "mouth", "orb", "core") if s in HUD_STYLES]
+        order = [s for s in ("face", "orb", "core") if s in HUD_STYLES]
         want = order[(order.index(cur) + 1) % len(order)] if cur in order else "face"
         save_hud_style(want)
         try:
@@ -4908,7 +4853,6 @@ class MainWindow(QMainWindow):
         self._refresh_hud_btn()
         self._log.append_log({
             "face": "SYS: HUD switched to the animated face.",
-            "mouth": "SYS: HUD switched to the mouth close-up.",
             "orb": "SYS: HUD switched to the voice orb.",
             "core": "SYS: HUD switched to the reactor core.",
         }.get(want, "SYS: HUD switched."))

@@ -27,7 +27,6 @@ It's not just an assistant — it's an extension of your digital life.
 | Feature | Description |
 |---|---|
 | 🧑‍🎤 Holographic Avatar | An animated human head in the HUD — real facial geometry, lit and drawn in software, no GPU or extra packages |
-| 👄 Mouth Close-Up | A second camera on that same head, framed tight enough to read the lip-sync shape by shape — dot field and energy filaments, no frame furniture |
 | 🔵 Voice Orb | The voice as a ball of dots — a dense limb, a hot core, embers off the surface, and nothing drawn around it at all |
 | 👄 Real Lip-Sync | ~50 mouth shapes a second from the audio's formants **and** the transcript — closures, spreads and rounds, not a volume meter |
 | 🌍 Language-Free Mouth | Articulation is derived by Unicode reduction, so Latin, Cyrillic and Greek scripts all work from one rule set — and scripts that hide pronunciation fall back cleanly |
@@ -111,8 +110,8 @@ There is no per-language table. Every character is reduced to a bare Latin lette
 #### 🙂 It acts while it talks
 Brows ride the *phrase*, not the syllable, with a slow asymmetry between them. The eyes make real saccades between fixation points, more often while speaking. It blinks. Loud syllables tip the head. Everything relaxes to neutral in silence — and the mouth **only** moves for the assistant's own voice, never for yours.
 
-#### ◉ Four HUDs, one toggle
-Not everyone wants a face looking back at them. ⚙ → **HUD** cycles the centrepiece between the animated head, a **mouth close-up**, a **voice orb** and the **reactor core** — a gauge ring, three arcs that turn at a rate the state sets, a spectrum ring driven by the real audio level, and a core that brightens with the voice. All four render in the same software painter and cost about the same; the choice is taste, and it survives a restart.
+#### ◉ Three HUDs, one toggle
+Not everyone wants a face looking back at them. ⚙ → **HUD** cycles the centrepiece between the animated head, a **voice orb** and the **reactor core** — a gauge ring, three arcs that turn at a rate the state sets, a spectrum ring driven by the real audio level, and a core that brightens with the voice. All three render in the same software painter and cost about the same; the choice is taste, and it survives a restart.
 
 Nothing on the core moves for decoration. The rings speed up when JARVIS is thinking, the spikes are the actual waveform, and the colour is the state — the same language the face speaks, without the face.
 
@@ -127,16 +126,6 @@ Four decisions make it a sphere rather than a cloud:
 * **The core goes white.** Additive light saturates to white, so the centre of something genuinely bright has to be white — a core that stays the accent colour reads as tinted fog.
 
 Silent, it turns slowly and shimmers. Speaking, the radius swells, a ridge travels across the surface at syllable speed, a band of brightness sweeps through it, and embers come off the loud flank. Nothing moves that the audio did not cause.
-
-#### 🔬 The mouth close-up
-At HUD size the mouth is about 20 px wide. That is enough to show *that* something is being said and nowhere near enough to see *what* — `/i/` and `/u/` land on the same two pixels. `HUD: MOUTH CLOSE-UP` points a much tighter lens — roughly 20× — at the same mesh, so the articulation becomes readable:
-
-* **It is one head, not a second one.** The camera wraps the same `HoloAvatar` and reads its pose every frame, so the wide shot and the close-up can never disagree about what the mouth is doing. Switching is a cut between two cameras on one set.
-* **The opening is real geometry.** A jaw rotation alone moves a *closed silhouette* down the face and reads as the mouth sliding, not opening, so this separates the lips along their own measured rig weights — lower lip down and back, upper lip up.
-* **The face is a dot lattice, not a surface.** Sampling the mesh into points leaves the mouth as the only dense thing in the frame, so the eye goes there by itself — and it costs less than the lit wide shot despite showing far more.
-* **The energy is the voice.** Filaments spring from the lip seam and embers are shed by it; length, brightness and emission all follow the level and the lip width. A silent mouth holds a tight ring and sheds nothing.
-
-One unbroken rule carries over from the wide shot: **nothing in that frame moves that the audio did not cause.**
 
 #### 🗣️ It answers before it works
 Some replies used to open with three or four seconds of silence: not because a tool was slow, but because JARVIS was still *writing the tool call* — a set of quiz questions, the findings from a contract. The tool was instant; the composing was not, and from the user's side those are the same thing.
@@ -346,7 +335,6 @@ JARVIS-MARK-I/
 │   ├── prompt.txt            # All prompt wording — {tokens} are filled from the live system at startup
 │   ├── avatar.py             # Avatar renderer — lighting, pose, expression, mouth (QPainter)
 │   ├── avatar_mesh.py        # Head geometry — loads the face, generates skull/neck/rigs
-│   ├── mouth_cam.py          # Mouth close-up — a second camera on that same head
 │   ├── voice_orb.py          # Voice orb — the voice as a ball of dots, no frame
 │   ├── face_model.obj        # The face itself (MediaPipe canonical model, Apache-2.0, 25 KB)
 │   ├── viseme.py             # Transcript → mouth shapes, fused with the audio's timing
