@@ -45,9 +45,9 @@ import math
 import random
 
 import numpy as np
-from PyQt6.QtCore import QLineF, QPointF, QRectF, Qt
-from PyQt6.QtGui import (QBrush, QColor, QFont, QPainter, QPainterPath,
-                         QPen, QPixmap, QPolygonF, QRadialGradient)
+from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtGui import (QBrush, QColor, QPainter, QPainterPath, QPen,
+                         QPixmap, QPolygonF, QRadialGradient)
 
 # `_c` and `_blend` are the avatar's colour helpers. Sharing them is the point:
 # a colour that is "35% of primary over the background" has to mean the same
@@ -433,8 +433,6 @@ class MouthCam:
 
         p.restore()
 
-        self._paint_reticle(p, cx, cy, r, primary, accent, amp)
-
     # -- background ---------------------------------------------------------
 
     def _paint_bloom(self, p: QPainter, mcx: float, mcy: float, r: float,
@@ -787,89 +785,3 @@ class MouthCam:
                           Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.drawPoint(QPointF(x, y))
         p.restore()
-
-    # -- overlay ------------------------------------------------------------
-
-    def _paint_reticle(self, p: QPainter, cx: float, cy: float, r: float,
-                       primary: QColor, accent: QColor, amp: float) -> None:
-        """The lens furniture: ring, corner brackets and the readouts.
-
-        Deliberately unclipped and drawn last, so it stays crisp over the head
-        and tells the eye this is an instrument looking at something, not a
-        cropped picture of a face.
-        """
-        p.setBrush(Qt.BrushStyle.NoBrush)
-
-        # Aperture ring, doubled: a bright hairline inside a dim one.
-        p.setPen(QPen(_c(primary, 60 + 60 * amp), max(1.0, r * 0.004)))
-        p.drawEllipse(QRectF(cx - r, cy - r, r * 2, r * 2))
-        p.setPen(QPen(_c(primary, 22), max(1.0, r * 0.0025)))
-        p.drawEllipse(QRectF(cx - r * 1.045, cy - r * 1.045,
-                             r * 2.09, r * 2.09))
-
-        # Corner brackets on a square, which read against the circular mask.
-        bl = r * 0.30
-        b = r * 1.045
-        p.setPen(QPen(_c(accent if amp > 0.05 else primary, 150),
-                      max(1.0, r * 0.006)))
-        for sx in (-1.0, 1.0):
-            for sy in (-1.0, 1.0):
-                x0 = cx + sx * b
-                y0 = cy + sy * b
-                path = QPainterPath()
-                path.moveTo(x0 - sx * bl, y0)
-                path.lineTo(x0, y0)
-                path.lineTo(x0, y0 - sy * bl)
-                p.drawPath(path)
-
-        # Graduations around the ring, a quarter of them lit by the level so the
-        # surround doubles as a second, subtler meter. Batched into two
-        # drawLines calls: 48 individual setPen/drawLine pairs cost 1.6 ms, and
-        # these ticks are drawn on every frame of a HUD that runs all day.
-        n = 48
-        lit = int(round(amp * n))
-        rr = r * 1.045
-        on_lines, off_lines = [], []
-        for k in range(n):
-            a = 2.0 * math.pi * k / n - math.pi * 0.5
-            ca, sa = math.cos(a), math.sin(a)
-            ln = r * (0.030 if k % 4 else 0.052)
-            seg = QLineF(cx + ca * rr, cy + sa * rr,
-                         cx + ca * (rr + ln), cy + sa * (rr + ln))
-            (on_lines if k < lit else off_lines).append(seg)
-        if off_lines:
-            p.setPen(QPen(_c(primary, 46), max(1.0, r * 0.003)))
-            p.drawLines(off_lines)
-        if on_lines:
-            p.setPen(QPen(_c(accent, 170), max(1.0, r * 0.003)))
-            p.drawLines(on_lines)
-
-        # Readouts. Small, wide-tracked and dim: they are labels on an
-        # instrument, not content — the status line below still owns the words.
-        p.setFont(QFont("Courier New", max(6, int(r * 0.052)),
-                        QFont.Weight.Bold))
-        p.setPen(QPen(_c(primary, 150), 1))
-        p.drawText(QRectF(cx - r, cy - r * 0.92, r * 2, r * 0.2),
-                   Qt.AlignmentFlag.AlignHCenter, "MOUTH CAM")
-
-        p.setFont(QFont("Courier New", max(6, int(r * 0.058)),
-                        QFont.Weight.Bold))
-        p.setPen(QPen(_c(accent if amp > 0.05 else primary, 190), 1))
-        p.drawText(QRectF(cx - r, cy + r * 0.72, r * 2, r * 0.22),
-                   Qt.AlignmentFlag.AlignHCenter,
-                   f"LIP SYNC {int(round(min(1.0, self._open) * 100)):02d}%")
-
-        # A short tick row under the readout: opening on the left, level on the
-        # right — the two numbers the close-up exists to show.
-        tw = r * 0.52
-        tn = 14
-        gap = tw / tn
-        ty = cy + r * 0.86
-        for k in range(tn):
-            x = cx - tw * 0.5 + gap * (k + 0.35)
-            if k < lit * tn / max(1, n):
-                col = _c(accent, 200)
-            else:
-                col = _c(primary, 54)
-            p.setPen(QPen(col, max(1.0, r * 0.012)))
-            p.drawLine(QPointF(x, ty), QPointF(x, ty + gap * 0.62))
